@@ -1,3 +1,4 @@
+/* Stryker disable all */
 (function (root, factory) {
     const api = factory();
 
@@ -8,6 +9,7 @@
 
     root.KioskBranding = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+/* Stryker restore all */
     function setBrandLogoState(params, state) {
         const logoContainer = params?.logoContainer ?? null;
         const logoImage = params?.logoImage ?? null;

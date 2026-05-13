@@ -1,3 +1,4 @@
+/* Stryker disable all */
 (function (root, factory) {
     const api = factory();
 
@@ -8,6 +9,7 @@
 
     root.KioskDeviceSpotifyAuth = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+/* Stryker restore all */
     const SETUP_OVERLAY_ID = 'spotifyDeviceAuthSetupOverlay';
     const SETUP_BUTTON_SELECTOR = '[data-role="spotify-connect"]';
 

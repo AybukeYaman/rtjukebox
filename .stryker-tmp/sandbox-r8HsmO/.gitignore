@@ -1,0 +1,50 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+*.log
+*.out.log
+*.err.log
+
+# Build
+dist/
+build/
+*.exe
+*.zip
+*.apk
+
+# Large local exports
+docker_export/
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tooling cache
+.vite/
+*/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local worktrees
+.worktrees/
+
+# Mobile specifically
+mobile/android/
+mobile/ios/
+mobile/node_modules/

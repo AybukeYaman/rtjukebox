@@ -59,6 +59,63 @@ function createMockRoot() {
 }
 
 describe('kiosk spotify helpers', () => {
+  it('verifies script element properties when loading the sdk', () => {
+    const root = createMockRoot();
+
+    const p = loadSpotifySdk({ root, scriptUrl: 'https://sdk.scdn.co/spotify-player.js' });
+    p.catch(() => {});
+
+    const script = root.scriptElements[0];
+    expect(script.src).toBe('https://sdk.scdn.co/spotify-player.js');
+    expect(script.async).toBe(true);
+    expect(script.defer).toBe(true);
+    expect(script.dataset.spotifyWebPlaybackSdk).toBe('true');
+
+    script.onerror();
+  });
+
+  it('calls an existing onSpotifyWebPlaybackSDKReady when the sdk loads', async () => {
+    const root = createMockRoot();
+    const previousReady = vi.fn();
+    root.onSpotifyWebPlaybackSDKReady = previousReady;
+
+    const loadPromise = loadSpotifySdk({ root });
+    const script = root.scriptElements[0];
+
+    root.Spotify = { Player: vi.fn() };
+    root.onSpotifyWebPlaybackSDKReady();
+
+    await loadPromise;
+    expect(previousReady).toHaveBeenCalledTimes(1);
+
+    script.onerror();
+  });
+
+  it('resolves immediately when the spotify sdk is already loaded', async () => {
+    const root = createMockRoot();
+    root.Spotify = { Player: vi.fn() };
+
+    const result = await loadSpotifySdk({ root });
+
+    expect(result).toBe(root.Spotify);
+    expect(root.document.createElement).not.toHaveBeenCalled();
+  });
+
+  it('rejects and resets the load promise when the sdk script fails to load', async () => {
+    const root = createMockRoot();
+
+    const loadPromise = loadSpotifySdk({ root, scriptUrl: 'https://sdk.scdn.co/spotify-player.js' });
+
+    const script = root.scriptElements[0];
+    script.onerror();
+
+    await expect(loadPromise).rejects.toThrow('Failed to load Spotify Web Playback SDK');
+
+    root.Spotify = { Player: vi.fn() };
+    const retryPromise = loadSpotifySdk({ root, scriptUrl: 'https://sdk.scdn.co/spotify-player.js' });
+    expect(retryPromise).not.toBe(loadPromise);
+  });
+
   it('loads the Spotify SDK only once and resolves when the ready callback fires', async () => {
     const root = createMockRoot();
 
@@ -139,6 +196,158 @@ describe('kiosk spotify helpers', () => {
     });
   });
 
+  it('does not mark track end when previous state has duration_ms null even if track_uri exists', () => {
+    const mapped = mapSpotifyPlayerState({
+      paused: true,
+      position: 0,
+      track_window: { current_track: null },
+    }, {
+      paused: false,
+      position_ms: 239000,
+      duration_ms: null,
+      track_ended: false,
+      track_uri: 'spotify:track:123',
+      track_id: '123',
+      track_name: 'Song',
+      track_artists: ['Artist A'],
+    });
+
+    expect(mapped.track_ended).toBe(false);
+  });
+
+  it('does not mark track end when same track is near end but not paused at position 0', () => {
+    const mapped = mapSpotifyPlayerState({
+      paused: false,
+      position: 239200,
+      track_window: {
+        current_track: {
+          uri: 'spotify:track:123',
+          id: '123',
+          name: 'Song',
+          duration_ms: 240000,
+          artists: [{ name: 'Artist A' }],
+        },
+      },
+    }, {
+      paused: false,
+      position_ms: 239000,
+      duration_ms: 240000,
+      track_ended: false,
+      track_uri: 'spotify:track:123',
+      track_id: '123',
+      track_name: 'Song',
+      track_artists: ['Artist A'],
+    });
+
+    expect(mapped.track_ended).toBe(false);
+  });
+
+  it('does not mark track end when previous position was not near the end', () => {
+    const mapped = mapSpotifyPlayerState({
+      paused: true,
+      position: 0,
+      track_window: {
+        current_track: {
+          uri: 'spotify:track:123',
+          id: '123',
+          name: 'Song Name',
+          duration_ms: 240000,
+          artists: [{ name: 'Artist A' }],
+        },
+      },
+    }, {
+      paused: false,
+      position_ms: 100000,
+      duration_ms: 240000,
+      track_ended: false,
+      track_uri: 'spotify:track:123',
+      track_id: '123',
+      track_name: 'Song Name',
+      track_artists: ['Artist A'],
+    });
+
+    expect(mapped.track_ended).toBe(false);
+  });
+
+  it('maps a null state to a fully null track payload', () => {
+    const mapped = mapSpotifyPlayerState(null);
+
+    expect(mapped).toEqual({
+      paused: false,
+      position_ms: 0,
+      duration_ms: null,
+      track_ended: false,
+      track_uri: null,
+      track_id: null,
+      track_name: null,
+      track_artists: [],
+    });
+  });
+
+  it('filters null artist entries out of track_artists', () => {
+    const mapped = mapSpotifyPlayerState({
+      paused: false,
+      position: 0,
+      track_window: {
+        current_track: {
+          uri: 'spotify:track:123',
+          id: '123',
+          name: 'Song',
+          duration_ms: 180000,
+          artists: [{ name: 'Artist A' }, null, { name: 'Artist B' }],
+        },
+      },
+    });
+
+    expect(mapped.track_artists).toEqual(['Artist A', 'Artist B']);
+  });
+
+  it('does not mark track end when previous state has no track_uri', () => {
+    const mapped = mapSpotifyPlayerState({
+      paused: true,
+      position: 0,
+      track_window: {
+        current_track: {
+          uri: 'spotify:track:123',
+          id: '123',
+          name: 'Song Name',
+          duration_ms: 240000,
+          artists: [{ name: 'Artist A' }],
+        },
+      },
+    }, {
+      paused: false,
+      position_ms: 239000,
+      duration_ms: 240000,
+      track_ended: false,
+      track_uri: null,
+      track_id: null,
+      track_name: null,
+      track_artists: [],
+    });
+
+    expect(mapped.track_ended).toBe(false);
+  });
+
+  it('marks track end when near end and next state has no current track', () => {
+    const mapped = mapSpotifyPlayerState({
+      paused: true,
+      position: 0,
+      track_window: { current_track: null },
+    }, {
+      paused: false,
+      position_ms: 239000,
+      duration_ms: 240000,
+      track_ended: false,
+      track_uri: 'spotify:track:123',
+      track_id: '123',
+      track_name: 'Song Name',
+      track_artists: ['Artist A'],
+    });
+
+    expect(mapped.track_ended).toBe(true);
+  });
+
   it('marks track end when the same song resets after reaching the end', () => {
     const mapped = mapSpotifyPlayerState({
       paused: true,
@@ -193,12 +402,18 @@ describe('kiosk spotify helpers', () => {
     const root = createMockRoot();
     const playerInstances = [];
     root.Spotify = {
-      Player: vi.fn().mockImplementation((config) => {
-        const instance = new FakePlayer(config);
-        playerInstances.push(instance);
-        return instance;
-      }),
-    };
+  Player: vi.fn(function (config) {
+    const instance = new FakePlayer(config);
+    playerInstances.push(instance);
+    this.config = instance.config;
+    this.listeners = instance.listeners;
+    this.addListener = (name, cb) => instance.addListener(name, cb);
+    this.connect = instance.connect;
+    this.activateElement = instance.activateElement;
+    this.disconnect = instance.disconnect;
+    this.emit = (name, payload) => instance.emit(name, payload);
+  }),
+};
 
     const wrapper = createSpotifyPlayer({
       root,
@@ -255,5 +470,182 @@ describe('kiosk spotify helpers', () => {
     expect(wrapper.connect).toBeTypeOf('function');
     expect(wrapper.activateElement).toBeTypeOf('function');
     expect(wrapper.disconnect).toBeTypeOf('function');
+  });
+
+  it('tracks last device id from the ready event via getLastDeviceId', () => {
+    class FakePlayer {
+      constructor(config) {
+        this.config = config;
+        this.listeners = {};
+      }
+      addListener(name, callback) { this.listeners[name] = callback; }
+      connect = vi.fn();
+      activateElement = vi.fn();
+      disconnect = vi.fn();
+      emit(name, payload) { this.listeners[name]?.(payload); }
+    }
+
+    const root = createMockRoot();
+    const playerInstances = [];
+    root.Spotify = {
+      Player: vi.fn(function (config) {
+        const instance = new FakePlayer(config);
+        playerInstances.push(instance);
+        this.config = instance.config;
+        this.listeners = instance.listeners;
+        this.addListener = (name, cb) => instance.addListener(name, cb);
+        this.connect = instance.connect;
+        this.activateElement = instance.activateElement;
+        this.disconnect = instance.disconnect;
+        this.emit = (name, payload) => instance.emit(name, payload);
+      }),
+    };
+
+    const wrapper = createSpotifyPlayer({
+      root,
+      playerName: 'Kiosk Browser',
+      getOAuthToken: vi.fn().mockResolvedValue('token-1'),
+      onReady: vi.fn(),
+    });
+
+    expect(wrapper.getLastDeviceId()).toBe(null);
+
+    playerInstances[0].emit('ready', { device_id: 'device-abc' });
+
+    expect(wrapper.getLastDeviceId()).toBe('device-abc');
+  });
+
+  it('wrapper methods delegate to the underlying sdk player', async () => {
+    class FakePlayer {
+      constructor(config) {
+        this.config = config;
+        this.listeners = {};
+      }
+      addListener(name, callback) { this.listeners[name] = callback; }
+      connect = vi.fn().mockResolvedValue(true);
+      activateElement = vi.fn().mockResolvedValue(undefined);
+      disconnect = vi.fn();
+      emit(name, payload) { this.listeners[name]?.(payload); }
+    }
+
+    const root = createMockRoot();
+    const playerInstances = [];
+    root.Spotify = {
+      Player: vi.fn(function (config) {
+        const instance = new FakePlayer(config);
+        playerInstances.push(instance);
+        this.config = instance.config;
+        this.listeners = instance.listeners;
+        this.addListener = (name, cb) => instance.addListener(name, cb);
+        this.connect = instance.connect;
+        this.activateElement = instance.activateElement;
+        this.disconnect = instance.disconnect;
+        this.emit = (name, payload) => instance.emit(name, payload);
+      }),
+    };
+
+    const wrapper = createSpotifyPlayer({
+      root,
+      playerName: 'Kiosk Browser',
+      getOAuthToken: vi.fn().mockResolvedValue('token-1'),
+    });
+
+    await wrapper.connect();
+    wrapper.activateElement();
+    wrapper.disconnect();
+
+    expect(playerInstances[0].connect).toHaveBeenCalledTimes(1);
+    expect(playerInstances[0].activateElement).toHaveBeenCalledTimes(1);
+    expect(playerInstances[0].disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the volume option to the sdk player config', () => {
+    class FakePlayer {
+      constructor(config) {
+        this.config = config;
+        this.listeners = {};
+      }
+      addListener(name, callback) { this.listeners[name] = callback; }
+      connect = vi.fn();
+      activateElement = vi.fn();
+      disconnect = vi.fn();
+      emit(name, payload) { this.listeners[name]?.(payload); }
+    }
+
+    const root = createMockRoot();
+    const playerInstances = [];
+    root.Spotify = {
+      Player: vi.fn(function (config) {
+        const instance = new FakePlayer(config);
+        playerInstances.push(instance);
+        this.config = instance.config;
+        this.listeners = instance.listeners;
+        this.addListener = (name, cb) => instance.addListener(name, cb);
+        this.connect = instance.connect;
+        this.activateElement = instance.activateElement;
+        this.disconnect = instance.disconnect;
+        this.emit = (name, payload) => instance.emit(name, payload);
+      }),
+    };
+
+    createSpotifyPlayer({
+      root,
+      playerName: 'Kiosk Browser',
+      getOAuthToken: vi.fn().mockResolvedValue('token-1'),
+      volume: 0.5,
+    });
+
+    expect(playerInstances[0].config.volume).toBe(0.5);
+  });
+
+  it('fires error callbacks for sdk error events', () => {
+    class FakePlayer {
+      constructor(config) {
+        this.config = config;
+        this.listeners = {};
+      }
+      addListener(name, callback) { this.listeners[name] = callback; }
+      connect = vi.fn();
+      activateElement = vi.fn();
+      disconnect = vi.fn();
+      emit(name, payload) { this.listeners[name]?.(payload); }
+    }
+
+    const root = createMockRoot();
+    const playerInstances = [];
+    root.Spotify = {
+      Player: vi.fn(function (config) {
+        const instance = new FakePlayer(config);
+        playerInstances.push(instance);
+        this.config = instance.config;
+        this.listeners = instance.listeners;
+        this.addListener = (name, cb) => instance.addListener(name, cb);
+        this.connect = instance.connect;
+        this.activateElement = instance.activateElement;
+        this.disconnect = instance.disconnect;
+        this.emit = (name, payload) => instance.emit(name, payload);
+      }),
+    };
+
+    const onError = vi.fn();
+    const onAutoplayFailed = vi.fn();
+
+    createSpotifyPlayer({
+      root,
+      playerName: 'Kiosk Browser',
+      getOAuthToken: vi.fn().mockResolvedValue('token-1'),
+      onError,
+      onAutoplayFailed,
+    });
+
+    const fakeError = { message: 'init failed' };
+    playerInstances[0].emit('initialization_error', fakeError);
+    playerInstances[0].emit('authentication_error', fakeError);
+    playerInstances[0].emit('account_error', fakeError);
+    playerInstances[0].emit('autoplay_failed', { reason: 'blocked' });
+
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenCalledWith(fakeError);
+    expect(onAutoplayFailed).toHaveBeenCalledWith({ reason: 'blocked' });
   });
 });

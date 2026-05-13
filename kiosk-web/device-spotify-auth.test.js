@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSpotifyDeviceAuthEndpoints,
+  buildSpotifyDeviceAuthStartUrl,
   createSpotifyDeviceAuthController,
   renderSpotifyDeviceAuthSetup,
   removeSpotifyDeviceAuthSetup,
@@ -67,6 +68,17 @@ describe('kiosk device spotify auth helper', () => {
       status: 'http://127.0.0.1:3000/api/v1/jukebox/kiosk/spotify-device-auth/status',
       start: 'http://127.0.0.1:3000/api/v1/jukebox/kiosk/spotify-device-auth/start',
     });
+  });
+
+  it('builds the start url with device_id and device_pwd', () => {
+    const url = buildSpotifyDeviceAuthStartUrl('http://127.0.0.1:3000', 'device-1', 'secret');
+    expect(url).toBe('http://127.0.0.1:3000/api/v1/jukebox/kiosk/spotify-device-auth/start?device_id=device-1&device_pwd=secret');
+  });
+
+  it('builds the start url without device_pwd when password is empty', () => {
+    const url = buildSpotifyDeviceAuthStartUrl('http://127.0.0.1:3000', 'device-1', '');
+    expect(url).not.toContain('device_pwd');
+    expect(url).toContain('device_id=device-1');
   });
 
   it('shows a blocking setup state when device spotify auth is missing', async () => {
@@ -349,5 +361,183 @@ describe('kiosk device spotify auth helper', () => {
 
     removeSpotifyDeviceAuthSetup(documentStub);
     expect(documentStub.getElementById('spotifyDeviceAuthSetupOverlay')).toBeNull();
+  });
+
+  it('ignores message events that are not SPOTIFY_DEVICE_AUTH_SUCCESS type', async () => {
+    const documentStub = createDocumentStub();
+    let messageHandler = null;
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ success: true, data: { deviceId: 'device-1', connected: false } }),
+    }));
+    const onConnected = vi.fn();
+
+    createSpotifyDeviceAuthController({
+      apiBaseUrl: 'http://127.0.0.1:3000',
+      deviceId: 'device-1',
+      devicePassword: 'secret',
+      document: documentStub,
+      fetch,
+      window: {
+        open: vi.fn(),
+        addEventListener: vi.fn((event, handler) => {
+          if (event === 'message') messageHandler = handler;
+        }),
+        removeEventListener: vi.fn(),
+      },
+      onConnected,
+    });
+
+    await messageHandler({ data: { type: 'SOME_OTHER_EVENT', deviceId: 'device-1' } });
+
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('ignores message events intended for a different device', async () => {
+    const documentStub = createDocumentStub();
+    let messageHandler = null;
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ success: true, data: { deviceId: 'device-1', connected: true } }),
+    }));
+    const onConnected = vi.fn();
+
+    createSpotifyDeviceAuthController({
+      apiBaseUrl: 'http://127.0.0.1:3000',
+      deviceId: 'device-1',
+      devicePassword: 'secret',
+      document: documentStub,
+      fetch,
+      window: {
+        open: vi.fn(),
+        addEventListener: vi.fn((event, handler) => {
+          if (event === 'message') messageHandler = handler;
+        }),
+        removeEventListener: vi.fn(),
+      },
+      onConnected,
+    });
+
+    await messageHandler({ data: { type: 'SPOTIFY_DEVICE_AUTH_SUCCESS', deviceId: 'device-OTHER' } });
+
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('removes the message listener when destroy is called', () => {
+    const documentStub = createDocumentStub();
+    const removeEventListener = vi.fn();
+    let capturedHandler = null;
+
+    const controller = createSpotifyDeviceAuthController({
+      apiBaseUrl: 'http://127.0.0.1:3000',
+      deviceId: 'device-1',
+      devicePassword: 'secret',
+      document: documentStub,
+      fetch: vi.fn(),
+      window: {
+        open: vi.fn(),
+        addEventListener: vi.fn((event, handler) => {
+          if (event === 'message') capturedHandler = handler;
+        }),
+        removeEventListener,
+      },
+    });
+
+    controller.destroy();
+
+    expect(removeEventListener).toHaveBeenCalledWith('message', capturedHandler);
+  });
+
+  it('wires the connect button click handler when querySelector finds it', async () => {
+    const onConnect = vi.fn();
+    const buttonListeners = {};
+    const button = {
+      addEventListener: vi.fn((event, handler) => {
+        buttonListeners[event] = handler;
+      }),
+    };
+    const documentWithButton = {
+      ...createDocumentStub(),
+      createElement(tagName) {
+        const el = {
+          tagName,
+          id: '',
+          className: '',
+          style: {},
+          innerHTML: '',
+          textContent: '',
+          dataset: {},
+          remove() {},
+          querySelector(selector) {
+            if (selector === '[data-role="spotify-connect"]') return button;
+            return null;
+          },
+        };
+        return el;
+      },
+    };
+
+    renderSpotifyDeviceAuthSetup(documentWithButton, { onConnect });
+
+    expect(button.addEventListener).toHaveBeenCalledWith('click', expect.any(Function));
+
+    await buttonListeners.click();
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses body.removeChild when the overlay element has no remove method', () => {
+    const appended = [];
+    const nodes = new Map();
+    const body = {
+      appendChild(node) {
+        appended.push(node);
+        if (node?.id) nodes.set(node.id, node);
+        return node;
+      },
+      removeChild: vi.fn((node) => {
+        const index = appended.indexOf(node);
+        if (index >= 0) appended.splice(index, 1);
+        if (node?.id) nodes.delete(node.id);
+        return node;
+      }),
+    };
+    const docWithoutRemove = {
+      body,
+      createElement(tagName) {
+        return {
+          tagName,
+          id: '',
+          className: '',
+          style: {},
+          innerHTML: '',
+          textContent: '',
+          dataset: {},
+          querySelector() { return null; },
+        };
+      },
+      getElementById(id) { return nodes.get(id) || null; },
+    };
+
+    renderSpotifyDeviceAuthSetup(docWithoutRemove, { reason: 'Bağlan' });
+    const overlay = docWithoutRemove.getElementById('spotifyDeviceAuthSetupOverlay');
+    expect(overlay).not.toBeNull();
+
+    removeSpotifyDeviceAuthSetup(docWithoutRemove);
+    expect(body.removeChild).toHaveBeenCalledWith(overlay);
+  });
+
+  it('escapes html special characters in the setup overlay reason', () => {
+    const documentStub = createDocumentStub();
+
+    renderSpotifyDeviceAuthSetup(documentStub, {
+      reason: '<script>alert("xss")</script>',
+      onConnect: vi.fn(),
+    });
+
+    const overlay = documentStub.getElementById('spotifyDeviceAuthSetupOverlay');
+    expect(overlay.innerHTML).not.toContain('<script>');
+    expect(overlay.innerHTML).toContain('&lt;script&gt;');
   });
 });

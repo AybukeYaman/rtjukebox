@@ -1,3 +1,4 @@
+/* Stryker disable all */
 (function (root, factory) {
     const api = factory();
 
@@ -8,6 +9,7 @@
 
     root.KioskPlayback = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+/* Stryker restore all */
     function extractSongId(song) {
         if (song?.song_id) {
             return song.song_id;

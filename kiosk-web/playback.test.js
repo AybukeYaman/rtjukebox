@@ -67,6 +67,103 @@ describe('kiosk playback helpers', () => {
     })).toBe(false);
   });
 
+  it('syncs the now playing view when only spotifyTrackUri is set even if isPlaying is false', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: { song_id: 'song-spotify-1', playback_type: 'spotify' },
+      isPlaying: false,
+      spotifyTrackUri: 'spotify:track:123',
+      startupBlocked: false,
+    })).toBe(true);
+  });
+
+  it('does not sync when both isPlaying and spotifyTrackUri are falsy', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: { song_id: 'song-local-1', playback_type: 'local' },
+      isPlaying: false,
+      spotifyTrackUri: null,
+      startupBlocked: false,
+    })).toBe(false);
+  });
+
+  it('returns unsupported plan when spotify source type has no uri', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-spotify-broken',
+      playback_type: 'spotify',
+      source_type: 'spotify',
+      spotify_uri: null,
+      file_url: null,
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan).toEqual({
+      kind: 'unsupported',
+      audioUrl: null,
+      spotifyUri: null,
+      songId: 'song-spotify-broken',
+    });
+  });
+
+  it('returns unsupported plan when local source has no file_url', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-local-broken',
+      playback_type: 'local',
+      source_type: 'local',
+      spotify_uri: null,
+      file_url: null,
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan).toEqual({
+      kind: 'unsupported',
+      audioUrl: null,
+      spotifyUri: null,
+      songId: 'song-local-broken',
+    });
+  });
+
+  it('returns unsupported plan when file_url is an empty string', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-empty',
+      source_type: 'local',
+      file_url: '',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('unsupported');
+  });
+
+  it('does not apply the current- prefix extraction when id is not a string', () => {
+    const plan = getSongPlaybackPlan({
+      id: 42,
+      source_type: 'local',
+      file_url: '/uploads/songs/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe(42);
+  });
+
+  it('returns false from shouldSyncNowPlayingView when params is null', () => {
+    expect(shouldSyncNowPlayingView(null)).toBe(false);
+  });
+
+  it('uses file_url as-is when it does not start with a slash', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-cdn',
+      source_type: 'local',
+      file_url: 'https://cdn.example.com/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('local');
+    expect(plan.audioUrl).toBe('https://cdn.example.com/song.mp3');
+  });
+
+  it('extracts song id from current- prefixed id when song_id is absent', () => {
+    const plan = getSongPlaybackPlan({
+      id: 'current-song-42',
+      source_type: 'local',
+      file_url: '/uploads/songs/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('song-42');
+  });
+
   it('keeps spotify queue items out of unsupported-song handling in the kiosk app', async () => {
     const appSource = fs.readFileSync(path.resolve(__dirname, './app.js'), 'utf8');
     const fetchCalls = [];

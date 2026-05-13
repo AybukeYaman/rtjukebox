@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import brandingHelpers from './branding.js';
 
-const { initializeBrandLogoFallback } = brandingHelpers;
+const { initializeBrandLogoFallback, setBrandLogoState } = brandingHelpers;
 
 function createClassList(initialClasses = []) {
   const classes = new Set(initialClasses);
@@ -117,5 +117,63 @@ describe('kiosk branding helpers', () => {
     expect(logoContainer.dataset.logoState).toBe('loaded');
     expect(logoImage.classList.contains('is-hidden')).toBe(false);
     expect(logoText.classList.contains('is-hidden')).toBe(true);
+  });
+
+  it('shows fallback when image is already complete but has zero natural width', () => {
+    const { logoContainer, logoImage, logoText } = createBrandNodes({
+      complete: true,
+      naturalWidth: 0,
+    });
+
+    const controller = initializeBrandLogoFallback({
+      logoContainer,
+      logoImage,
+      logoText,
+    });
+
+    expect(controller.getState()).toBe('fallback');
+    expect(logoContainer.dataset.logoState).toBe('fallback');
+    expect(logoImage.classList.contains('is-hidden')).toBe(true);
+    expect(logoText.classList.contains('is-hidden')).toBe(false);
+  });
+
+  it('sets logo state data attribute and toggles classes correctly for fallback', () => {
+    const params = {
+      logoContainer: { dataset: {} },
+      logoImage: { classList: createClassList() },
+      logoText: { classList: createClassList(['is-hidden']) },
+    };
+
+    setBrandLogoState(params, 'fallback');
+
+    expect(params.logoContainer.dataset.logoState).toBe('fallback');
+    expect(params.logoImage.classList.contains('is-hidden')).toBe(true);
+    expect(params.logoText.classList.contains('is-hidden')).toBe(false);
+  });
+
+  it('sets logo state data attribute and toggles classes correctly for loaded', () => {
+    const params = {
+      logoContainer: { dataset: {} },
+      logoImage: { classList: createClassList(['is-hidden']) },
+      logoText: { classList: createClassList() },
+    };
+
+    setBrandLogoState(params, 'loaded');
+
+    expect(params.logoContainer.dataset.logoState).toBe('loaded');
+    expect(params.logoImage.classList.contains('is-hidden')).toBe(false);
+    expect(params.logoText.classList.contains('is-hidden')).toBe(true);
+  });
+
+  it('does not throw when setBrandLogoState is called with null params', () => {
+    expect(() => setBrandLogoState(null, 'loaded')).not.toThrow();
+    expect(() => setBrandLogoState(null, 'fallback')).not.toThrow();
+  });
+
+  it('does not throw when setBrandLogoState receives null element refs', () => {
+    expect(() => setBrandLogoState(
+      { logoContainer: null, logoImage: null, logoText: null },
+      'loaded'
+    )).not.toThrow();
   });
 });

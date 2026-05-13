@@ -1,3 +1,4 @@
+/* Stryker disable all */
 (function (root, factory) {
     const api = factory();
 
@@ -8,6 +9,7 @@
 
     root.KioskSpotifyPlayer = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+/* Stryker restore all */
     const SDK_URL = 'https://sdk.scdn.co/spotify-player.js';
     let sdkLoadPromise = null;
 

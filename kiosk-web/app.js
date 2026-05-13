@@ -373,6 +373,13 @@ class KioskApp {
             this.socket = null;
         }
 
+        this.stopProgressUpdate();
+
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+
         if (this.spotifyController) {
             this.reportSpotifyPlaybackDeviceState(false);
             this.spotifyController.disconnect();
@@ -392,6 +399,8 @@ class KioskApp {
 
         // Clear device data
         this.device = null;
+
+clearTimeout(this._registerRetryTimer);
         this.queueData = { now_playing: null, queue: [] };
 
         // Clear stored credentials
@@ -492,8 +501,9 @@ class KioskApp {
         // Direct Text Link (Always visible)
         const hint = document.querySelector('.qr-hint');
         if (hint) {
+            const escapedLink = this.escapeHtml(qrLink);
             hint.innerHTML = `Tarayın veya adresi girin:<br>
-            <a href="${qrLink}" style="color:var(--accent-red); text-decoration:none; font-weight:bold; word-break:break-all; display:block; margin-top:5px;">${qrLink}</a>`;
+            <a href="${escapedLink}" style="color:var(--accent-red); text-decoration:none; font-weight:bold; word-break:break-all; display:block; margin-top:5px;">${escapedLink}</a>`;
         }
 
         if (typeof QRCode !== 'undefined') {
@@ -655,7 +665,7 @@ class KioskApp {
                 is_active: isActive,
             }),
         }).catch((error) => {
-            this.log(`âš ï¸ Spotify cihaz durumu bildirilemedi: ${error.message}`, 'error');
+        this.log(`⚠️ Spotify cihaz durumu bildirilemedi: ${error.message}`, 'error');
         });
     }
 
@@ -761,7 +771,7 @@ class KioskApp {
         }
 
         Promise.resolve(player.pause()).catch((error) => {
-            this.log(`âš ï¸ Spotify durdurma hatasÄ±: ${error.message}`, 'error');
+            this.log(`⚠️ Spotify durdurma hatası: ${error.message}`, 'error');
         });
     }
 
@@ -797,13 +807,14 @@ class KioskApp {
                 if (this.isPlaying) {
                     this.syncNowPlayingUi();
                 }
-            } else if (sdkState === null) {
-                this.isPlaying = false;
-            }
+           } else if (sdkState === null) {
+    this.isPlaying = false;
+    this.stopProgressUpdate();
+}
 
             return this.spotifyPlayerState;
         } catch (error) {
-            this.log(`âš ï¸ Spotify state yenileme hatasÄ±: ${error.message}`, 'error');
+            this.log(`⚠️ Spotify state yenileme hatası: ${error.message}`, 'error');
             return this.spotifyPlayerState;
         }
     }
@@ -876,9 +887,9 @@ class KioskApp {
                 qrContainer.innerHTML = `<div style="font-size:10px; color:gray">Backend'e ulaşılamıyor:<br>${CONFIG.API_URL}</div>`;
             }
             // Retry after delay (only if not 404)
-            if (!error.message.includes('404')) {
-                setTimeout(() => this.registerDevice(), CONFIG.RECONNECT_INTERVAL);
-            }
+      if (!error.message.includes('404') && CONFIG.DEVICE_CODE) {
+    this._registerRetryTimer = setTimeout(() => this.registerDevice(), CONFIG.RECONNECT_INTERVAL);
+}
         }
     }
 
@@ -1011,8 +1022,8 @@ class KioskApp {
             return;
         }
 
-        if (!this.isPlaying && this.queueData.now_playing) {
-            this.playSong(this.queueData.now_playing);
+        if (!this.isPlaying && this.queueData.now_playing && !this.spotifyPlayerState?.track_uri) {
+    this.playSong(this.queueData.now_playing);
         } else if (!this.isPlaying && this.queueData.queue && this.queueData.queue.length > 0) {
             this.playSong(this.queueData.queue[0]);
         } else if (!this.isPlaying && !this.queueData.now_playing) {
@@ -1046,9 +1057,9 @@ class KioskApp {
             body: JSON.stringify({ device_id: this.device.id })
         }).then(r => r.json())
             .then(d => {
-                this.log(`🤖 Otomatik eklendi: ${d.data?.song_title || 'Şarkı'}`);
-                // Resulting queue_updated broadcast will trigger playNext/checkNext
-            })
+    this.log(`🤖 Otomatik eklendi: ${d.data?.song_title || 'Şarkı'}`);
+    this.autoplayTriggered = false;
+})
             .catch(e => {
                 console.error(e);
                 this.autoplayTriggered = false; // Allow retry on failure
@@ -1125,18 +1136,17 @@ class KioskApp {
                 return;
             }
 
-            this.pauseSpotifyPlayback();
-            this.spotifyPlayerState = null;
-            // LOCK: Set isPlaying immediately to prevent other triggers while loading
-            this.isPlaying = true;
-            this.audioPlayer.src = audioUrl;
+          this.pauseSpotifyPlayback();
+this.spotifyPlayerState = null;
+this.audioPlayer.src = audioUrl;
 
-            const playPromise = this.audioPlayer.play();
-            if (playPromise !== undefined) {
-                await playPromise;
-            }
-            this.log('✅ Çalma başladı');
-            this.showPlayingState(song);
+const playPromise = this.audioPlayer.play();
+if (playPromise !== undefined) {
+    await playPromise;
+}
+this.isPlaying = true;
+this.log('✅ Çalma başladı');
+this.showPlayingState(song);
 
             // Notify server
             if (this.device) {
@@ -1145,7 +1155,7 @@ class KioskApp {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         device_id: this.device.id,
-                        song_id: song.song_id || (song.id.includes('autoplay') ? song.id.split('autoplay-')[1] : song.id)
+                        song_id: playbackPlan.songId
                     })
                 }).catch(e => this.log(`⚠️ Sunucu bildirim hatası: ${e.message}`, 'error'));
             }
@@ -1157,7 +1167,6 @@ class KioskApp {
     }
 
     async playSpotifySong(song) {
-        this.isPlaying = true;
         await this.ensureSpotifyPlaybackReady();
 
         if (!this.spotifyController) {
@@ -1454,7 +1463,7 @@ KioskApp.prototype.playSong = async function (song) {
                 this.showPlayingState(song);
             }).catch((error) => {
                 this.isPlaying = false;
-                this.log(`âŒ Ã‡alma baÅŸarÄ±sÄ±z: ${error.message}`, 'error');
+    this.log(`⚠️ Spotify cihaz durumu bildirilemedi: ${error.message}`, 'error');
                 if (error.name === 'NotAllowedError') {
                     this.log('ğŸ‘‰ LÃ¼tfen ekrana bir kez tÄ±klayÄ±n!');
                     this.showStartupOverlay();
