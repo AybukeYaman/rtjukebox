@@ -1731,4 +1731,229 @@ describe('kiosk playback helpers', () => {
     expect(showStartupOverlay).toHaveBeenCalled();
     expect(showDeviceSetupOverlay).not.toHaveBeenCalled();
   });
+
+  // ===== MUTATION TEST FIX: Optional chaining in extractSongId =====
+  it('handles missing song_id property by using id as fallback', () => {
+    const plan = getSongPlaybackPlan({
+      id: 'id-only',
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('id-only');
+  });
+
+  it('handles null song_id by trying id property', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: null,
+      id: 'fallback-id',
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('fallback-id');
+  });
+
+  it('handles undefined song_id by using id property', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: undefined,
+      id: 'undefined-fallback',
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('undefined-fallback');
+  });
+
+  // ===== MUTATION TEST FIX: String prefix detection =====
+  it('detects non-string id and does not apply current- prefix extraction', () => {
+    const plan = getSongPlaybackPlan({
+      id: 123,
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe(123);
+  });
+
+  it('extracts song id from current- prefix for string ids', () => {
+    const plan = getSongPlaybackPlan({
+      id: 'current-extracted-id-123',
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('extracted-id-123');
+  });
+
+  it('handles current- prefix boundary correctly', () => {
+    const plan = getSongPlaybackPlan({
+      id: 'current-',
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('');
+  });
+
+  it('does not extract current- if string does not start with current-', () => {
+    const plan = getSongPlaybackPlan({
+      id: 'notcurrent-id',
+      source_type: 'local',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.songId).toBe('notcurrent-id');
+  });
+
+  // ===== MUTATION TEST FIX: Source type fallback logic =====
+  it('uses playback_type when source_type is missing', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-1',
+      playback_type: 'spotify',
+      source_type: undefined,
+      spotify_uri: 'spotify:track:123',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('spotify');
+  });
+
+  it('defaults to local when both playback_type and source_type are missing', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-default',
+      file_url: '/song.mp3',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('local');
+  });
+
+  it('uses source_type when playback_type is null', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-2',
+      playback_type: null,
+      source_type: 'spotify',
+      spotify_uri: 'spotify:track:456',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('spotify');
+  });
+
+  // ===== MUTATION TEST FIX: Spotify source type exact match =====
+  it('only returns spotify kind when sourceType is exactly spotify', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-spotify',
+      source_type: 'Spotify',
+      spotify_uri: 'spotify:track:789',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).not.toBe('spotify');
+    expect(plan.kind).toBe('unsupported');
+  });
+
+  // ===== MUTATION TEST FIX: File URL string validation =====
+  it('validates file_url is a non-empty string before processing', () => {
+    const plan1 = getSongPlaybackPlan({
+      song_id: 'song-1',
+      source_type: 'local',
+      file_url: 0,
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan1.kind).toBe('unsupported');
+
+    const plan2 = getSongPlaybackPlan({
+      song_id: 'song-2',
+      source_type: 'local',
+      file_url: false,
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan2.kind).toBe('unsupported');
+  });
+
+  it('does not build local plan when file_url is empty string', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-empty',
+      source_type: 'local',
+      file_url: '',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('unsupported');
+  });
+
+  // ===== MUTATION TEST FIX: Spotify URI fallback for unsupported =====
+  it('preserves spotify_uri in unsupported plan via nullish coalescing', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-unsupported',
+      source_type: 'unknown',
+      spotify_uri: 'spotify:track:fallback',
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('unsupported');
+    expect(plan.spotifyUri).toBe('spotify:track:fallback');
+  });
+
+  it('returns null for spotifyUri when unsupported and no spotify_uri provided', () => {
+    const plan = getSongPlaybackPlan({
+      song_id: 'song-unsupported-no-uri',
+      source_type: 'unknown',
+      spotify_uri: null,
+    }, 'http://127.0.0.1:3000');
+
+    expect(plan.kind).toBe('unsupported');
+    expect(plan.spotifyUri).toBeNull();
+  });
+
+  // ===== MUTATION TEST FIX: shouldSyncNowPlayingView conditions =====
+  it('returns false from shouldSyncNowPlayingView when startupBlocked is truthy', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: { song_id: 'song-1' },
+      isPlaying: true,
+      spotifyTrackUri: 'spotify:track:123',
+      startupBlocked: true,
+    })).toBe(false);
+  });
+
+  it('returns false from shouldSyncNowPlayingView when nowPlaying is null', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: null,
+      isPlaying: true,
+      spotifyTrackUri: 'spotify:track:123',
+      startupBlocked: false,
+    })).toBe(false);
+  });
+
+  it('returns false from shouldSyncNowPlayingView when nowPlaying is undefined', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: undefined,
+      isPlaying: true,
+      spotifyTrackUri: 'spotify:track:123',
+      startupBlocked: false,
+    })).toBe(false);
+  });
+
+  it('returns false from shouldSyncNowPlayingView when both isPlaying and spotifyTrackUri are falsy', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: { song_id: 'song-1' },
+      isPlaying: false,
+      spotifyTrackUri: null,
+      startupBlocked: false,
+    })).toBe(false);
+  });
+
+  it('returns false from shouldSyncNowPlayingView when both isPlaying and spotifyTrackUri are undefined', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: { song_id: 'song-1' },
+      isPlaying: undefined,
+      spotifyTrackUri: undefined,
+      startupBlocked: false,
+    })).toBe(false);
+  });
+
+  it('returns true when isPlaying is true even if spotifyTrackUri is falsy', () => {
+    expect(shouldSyncNowPlayingView({
+      nowPlaying: { song_id: 'song-1' },
+      isPlaying: true,
+      spotifyTrackUri: null,
+      startupBlocked: false,
+    })).toBe(true);
+  });
 });
